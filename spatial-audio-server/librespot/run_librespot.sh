@@ -13,6 +13,11 @@ if [ ! -p "$FIFO_PATH" ]; then
     mkfifo "$FIFO_PATH"
 fi
 
+# Spotify Credentials (Optional)
+# If left empty, Discovery mode (Spotify Connect) will be used.
+SPOTIFY_USER=""
+SPOTIFY_PASS=""
+
 echo "Starting librespot..."
 # Using local binary if present
 LIBRESPOT_BIN="./librespot"
@@ -27,4 +32,12 @@ if [ ! -x "$LIBRESPOT_BIN" ]; then
     fi
 fi
 
-$LIBRESPOT_BIN -n "SpatialSource" --backend pipe --device "$FIFO_PATH" --format S16
+ARGS="-n SpatialSource --backend pipe --device $FIFO_PATH --format S16"
+
+if [ -n "$SPOTIFY_USER" ] && [ -n "$SPOTIFY_PASS" ]; then
+    echo "Mode: Credential Login ($SPOTIFY_USER)"
+    $LIBRESPOT_BIN $ARGS -u "$SPOTIFY_USER" -p "$SPOTIFY_PASS"
+else
+    echo "Mode: Discovery (Spotify Connect)"
+    $LIBRESPOT_BIN $ARGS
+fi
