@@ -1,29 +1,11 @@
 /**
- * server.js — Express API for managing Bluetooth speakers,
- * snapclient instances, and spatial volume control.
+ * server.js — Express API for managing Wi-Fi Snapclients and spatial volume control.
  *
  * Runs on the Raspberry Pi alongside snapserver.
  * The React web app (snapweb) calls these endpoints from the browser.
  */
 import express from 'express';
 import cors from 'cors';
-import {
-  scanDevices,
-  listConnectedDevices,
-  pairAndConnect,
-  connectDevice,
-  disconnectDevice,
-  getConnectedSpeakers,
-  setSinkVolume,
-  listBluetoothSinks,
-} from './bt-manager.js';
-import {
-  startClient,
-  stopClient,
-  stopAll,
-  listClients,
-  isRunning,
-} from './snapclient-manager.js';
 import { calculateVolumes, getMode } from './spatial-engine.js';
 
 const app = express();
@@ -33,19 +15,52 @@ app.use(cors());
 app.use(express.json());
 
 // ─── Speaker state (persisted in memory) ───
-let speakerLayout = [];  // [{ mac, sinkName, name, role, x, y }]
+let speakerLayout = [];  // [{ id, name, role, x, y }]
 let listenerPos = { x: 3, y: 2.5 };
 let roomSize = { width: 6, height: 5 };
 
-// ─── BT Discovery ───
+// ─── Snapserver JSON-RPC Helper ───
+async function snapserverRpc(method, params = {}) {
+  try {
+    const response = await fetch('http://localhost:1780/jsonrpc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 1, jsonrpc: '2.0', method, params }),
+    });
+    const data = await response.json();
+    return data.result;
+  } catch (err) {
+    console.error(`[snapserver] RPC Error (${method}):`, err.message);
+    throw err;
+  }
+}
 
-/** GET /api/speakers — list connected BT speakers with sink info */
+// ─── Wi-Fi Discovery ───
+
+/** GET /api/speakers — list connected Wi-Fi clients */
 app.get('/api/speakers', async (req, res) => {
   try {
-    const speakers = await getConnectedSpeakers();
-    // Merge with saved layout data (roles, positions)
-    const merged = speakers.map(sp => {
-      const saved = speakerLayout.find(s => s.mac === sp.mac);
+    const result = await snapserverRpc('Server.GetStatus');
+    const groups = result?.server?.groups || [];
+    
+    // Extract clients
+    const clients = [];
+    for (const g of groups) {
+      for (const c of g.clients) {
+        if (c.connected) {
+          clients.push({
+            id: c.id,
+            name: c.config?.name || c.host?.name || 'Unknown',
+            volume: c.config?.volume?.percent || 0,
+            muted: c.config?.volume?.muted || false,
+          });
+        }
+      }
+    }
+
+    // Merge with saved layout data
+    const merged = clients.map(sp => {
+      const saved = speakerLayout.find(s => s.id === sp.id);
       return {
         ...sp,
         role: saved?.role || 'auto',
@@ -53,142 +68,15 @@ app.get('/api/speakers', async (req, res) => {
         y: saved?.y ?? 1,
       };
     });
-    const clients = listClients();
+
     const mode = getMode(merged.length);
-    res.json({ speakers: merged, mode, streaming: isRunning(), clients });
+    res.json({ speakers: merged, mode, streaming: true, clients: merged });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-/** GET /api/speakers/scan — scan for nearby BT devices (~10s) */
-app.get('/api/speakers/scan', async (req, res) => {
-  try {
-    const duration = parseInt(req.query.duration) || 10;
-    const devices = await scanDevices(duration);
-    // Filter out already connected
-    const connected = await listConnectedDevices();
-    const connectedMacs = new Set(connected.map(d => d.mac));
-    const available = devices.filter(d => !connectedMacs.has(d.mac));
-    res.json({ devices: available, connected: connected.length });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/** POST /api/speakers/pair — pair and connect a new device */
-app.post('/api/speakers/pair', async (req, res) => {
-  try {
-    const { mac } = req.body;
-    if (!mac) return res.status(400).json({ error: 'mac address required' });
-    const info = await pairAndConnect(mac);
-    res.json({ success: true, device: info });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/** POST /api/speakers/connect — connect already-paired device */
-app.post('/api/speakers/connect', async (req, res) => {
-  try {
-    const { mac } = req.body;
-    if (!mac) return res.status(400).json({ error: 'mac address required' });
-    const info = await connectDevice(mac);
-    res.json({ success: true, device: info });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/** POST /api/speakers/disconnect — disconnect a device */
-app.post('/api/speakers/disconnect', async (req, res) => {
-  try {
-    const { mac } = req.body;
-    if (!mac) return res.status(400).json({ error: 'mac address required' });
-    // Stop its snapclient first
-    const sinks = await listBluetoothSinks();
-    const sink = sinks.find(s => s.mac === mac.toUpperCase());
-    if (sink) stopClient(sink.sinkName);
-    await disconnectDevice(mac);
-    // Remove from layout
-    speakerLayout = speakerLayout.filter(s => s.mac !== mac);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Theater Control ───
-
-/** POST /api/theater/start — start snapclients for all connected speakers */
-app.post('/api/theater/start', async (req, res) => {
-  try {
-    const speakers = await getConnectedSpeakers();
-    console.log(`[theater] Found ${speakers.length} speakers:`, speakers.map(s => `${s.name} (${s.mac}) sink=${s.sinkName}`));
-
-    if (speakers.length === 0) {
-      return res.status(400).json({ error: 'No Bluetooth speakers connected' });
-    }
-
-    // Check that speakers have PulseAudio sinks
-    const speakersWithSinks = speakers.filter(sp => sp.sinkName);
-    if (speakersWithSinks.length === 0) {
-      return res.status(400).json({
-        error: 'Bluetooth speakers connected but no PulseAudio sinks found. Try disconnecting and reconnecting the speakers.',
-        speakers: speakers.map(s => ({ mac: s.mac, name: s.name, sinkName: s.sinkName })),
-      });
-    }
-
-    // Start a snapclient for each speaker that has a sink
-    const results = [];
-    for (const sp of speakersWithSinks) {
-      const hostId = `theater_${sp.mac.replace(/:/g, '')}`;
-      console.log(`[theater] Starting client for ${sp.name} -> sink: ${sp.sinkName}`);
-      const entry = startClient(sp.sinkName, hostId);
-      results.push({ mac: sp.mac, name: sp.name, sinkName: sp.sinkName, status: entry.status });
-    }
-
-    // Wait a moment for clients to connect, then check status and apply volumes
-    setTimeout(async () => {
-      const activeClients = listClients();
-      console.log(`[theater] After 3s: ${activeClients.length} clients still running:`, activeClients);
-      if (activeClients.length > 0) {
-        await applyVolumes();
-      } else {
-        console.error('[theater] WARNING: All snapclients exited within 3 seconds of starting!');
-      }
-    }, 3000);
-
-    const mode = getMode(results.length);
-    res.json({ success: true, mode, speakers: results });
-  } catch (err) {
-    console.error('[theater] Start failed:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/** POST /api/theater/stop — stop all snapclients */
-app.post('/api/theater/stop', async (req, res) => {
-  stopAll();
-  res.json({ success: true });
-});
-
-/** GET /api/theater/status — current theater state */
-app.get('/api/theater/status', async (req, res) => {
-  const clients = listClients();
-  const speakers = await getConnectedSpeakers();
-  const mode = getMode(speakers.length);
-  res.json({
-    streaming: isRunning(),
-    mode,
-    speakerCount: speakers.length,
-    clients,
-    listenerPos,
-    roomSize,
-  });
-});
-
-// ─── Layout / Spatial ───
+// ─── Theater Control (Volume Sync) ───
 
 /** POST /api/layout — update speaker positions, roles, listener pos */
 app.post('/api/layout', async (req, res) => {
@@ -198,11 +86,7 @@ app.post('/api/layout', async (req, res) => {
     if (listener) listenerPos = listener;
     if (room) roomSize = room;
 
-    // Recalculate and apply volumes if streaming
-    if (isRunning()) {
-      await applyVolumes();
-    }
-
+    await applyVolumes();
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -210,25 +94,43 @@ app.post('/api/layout', async (req, res) => {
 });
 
 /**
- * Recalculate spatial volumes and apply to PulseAudio sinks.
+ * Recalculate spatial volumes and apply to Snapserver clients via RPC.
  */
 async function applyVolumes() {
-  const speakers = await getConnectedSpeakers();
-  const withLayout = speakers.map(sp => {
-    const saved = speakerLayout.find(s => s.mac === sp.mac);
-    return {
-      sinkName: sp.sinkName,
-      role: saved?.role || 'auto',
-      x: saved?.x ?? 3,
-      y: saved?.y ?? 1,
-    };
-  }).filter(sp => sp.sinkName);
+  const result = await snapserverRpc('Server.GetStatus');
+  if (!result) return;
+  
+  const connectedIds = new Set();
+  for (const g of result.server.groups) {
+    for (const c of g.clients) {
+      if (c.connected) connectedIds.add(c.id);
+    }
+  }
+
+  const withLayout = speakerLayout
+    .filter(s => connectedIds.has(s.id))
+    .map(s => ({
+      sinkName: s.id, // Reusing sinkName property for Client ID in spatial-engine
+      role: s.role,
+      x: s.x,
+      y: s.y,
+    }));
 
   const volumes = calculateVolumes(withLayout, listenerPos, roomSize);
 
   for (const v of volumes) {
-    await setSinkVolume(v.sinkName, v.leftVolume, v.rightVolume);
-    console.log(`[spatial] ${v.sinkName}: L=${v.leftVolume}% R=${v.rightVolume}%`);
+    // Snapserver RPC only sets master volume. We use the max of left/right 
+    // for distance attenuation. Channel separation must be set in the client app.
+    const masterVol = Math.max(v.leftVolume, v.rightVolume);
+    try {
+      await snapserverRpc('Client.SetVolume', {
+        id: v.sinkName,
+        volume: { percent: masterVol, muted: false }
+      });
+      console.log(`[spatial] Client ${v.sinkName} volume set to ${masterVol}%`);
+    } catch (e) {
+      console.error(`[spatial] Failed to set volume for ${v.sinkName}`);
+    }
   }
 }
 
@@ -237,33 +139,16 @@ async function applyVolumes() {
 /** GET /api/now-playing — get current stream status from snapserver */
 app.get('/api/now-playing', async (req, res) => {
   try {
-    // Snapserver exposes a JSON-RPC API on its HTTP port
-    const snapHost = req.query.host || 'localhost';
-    const snapPort = req.query.port || 1780;
-    const rpcPayload = JSON.stringify({
-      id: 1,
-      jsonrpc: '2.0',
-      method: 'Server.GetStatus',
-    });
+    const result = await snapserverRpc('Server.GetStatus');
+    const groups = result?.server?.groups || [];
+    const streams = result?.server?.streams || [];
 
-    const response = await fetch(`http://${snapHost}:${snapPort}/jsonrpc`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: rpcPayload,
-    });
-
-    const data = await response.json();
-    const groups = data?.result?.server?.groups || [];
-    const streams = data?.result?.server?.streams || [];
-
-    // Extract stream info
     const streamInfo = streams.map(s => ({
       id: s.id,
       status: s.status,
       uri: s.uri?.raw,
     }));
 
-    // Extract connected client info
     const clientInfo = [];
     for (const g of groups) {
       for (const c of g.clients) {
@@ -284,7 +169,6 @@ app.get('/api/now-playing', async (req, res) => {
 
 // ─── Start ───
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🔊 Speaker Server running at http://0.0.0.0:${PORT}`);
-  console.log(`   API: http://localhost:${PORT}/api/speakers`);
-  console.log(`   Theater: http://localhost:${PORT}/api/theater/status\n`);
+  console.log(`\n🔊 Speaker Server (Wi-Fi Mode) running at http://0.0.0.0:${PORT}`);
+  console.log(`   API: http://localhost:${PORT}/api/speakers\n`);
 });

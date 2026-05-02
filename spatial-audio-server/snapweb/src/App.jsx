@@ -12,39 +12,32 @@ const ROLE_CONFIG = {
 
 function App() {
   // ─── State ───
-  const [speakers, setSpeakers] = useState([]);
+  const [speakers, setSpeakers] = useState([]); // Wi-Fi Clients
   const [listenerPos, setListenerPos] = useState({ x: 3, y: 2.5 });
   const [roomSize] = useState(ROOM_DEFAULT);
-  const [streaming, setStreaming] = useState(false);
+  const [streaming, setStreaming] = useState(true);
   const [mode, setMode] = useState('No Speakers');
-  const [scanning, setScanning] = useState(false);
-  const [discoveredDevices, setDiscoveredDevices] = useState([]);
-  const [showScanModal, setShowScanModal] = useState(false);
-  const [pairing, setPairing] = useState(null);
-  const [dragging, setDragging] = useState(null); // { type: 'speaker'|'listener', index }
-  const [serverIp] = useState(window.location.hostname || 'localhost');
   const [snapInfo, setSnapInfo] = useState({ streams: [], clients: [] });
   const [error, setError] = useState(null);
-  const [starting, setStarting] = useState(false);
+  const [dragging, setDragging] = useState(null); // { type: 'speaker'|'listener', index }
   const roomRef = useRef(null);
 
-  // ─── Fetch speakers on mount and poll ───
+  // ─── Fetch clients on mount and poll ───
   const fetchSpeakers = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/speakers`);
       const data = await res.json();
       setSpeakers(data.speakers || []);
       setMode(data.mode || 'No Speakers');
-      setStreaming(data.streaming || false);
       setError(null);
     } catch {
-      setError('Cannot reach Speaker Server. Is it running on the RPi?');
+      setError('Cannot reach Speaker Server. Is it running?');
     }
   }, []);
 
   const fetchNowPlaying = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/now-playing?host=localhost`);
+      const res = await fetch(`${API_BASE}/api/now-playing`);
       const data = await res.json();
       setSnapInfo(data);
     } catch { /* silent */ }
@@ -56,84 +49,14 @@ function App() {
     const id = setInterval(() => {
       fetchSpeakers();
       fetchNowPlaying();
-    }, 5000);
+    }, 3000);
     return () => clearInterval(id);
   }, [fetchSpeakers, fetchNowPlaying]);
 
-  // ─── API Actions ───
-  const scanForDevices = async () => {
-    setScanning(true);
-    setShowScanModal(true);
-    setDiscoveredDevices([]);
-    try {
-      const res = await fetch(`${API_BASE}/api/speakers/scan?duration=10`);
-      const data = await res.json();
-      setDiscoveredDevices(data.devices || []);
-    } catch (e) {
-      setError('Scan failed: ' + e.message);
-    }
-    setScanning(false);
-  };
+  // ─── Actions ───
 
-  const pairDevice = async (mac) => {
-    setPairing(mac);
-    try {
-      await fetch(`${API_BASE}/api/speakers/pair`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mac }),
-      });
-      await fetchSpeakers();
-      setDiscoveredDevices(prev => prev.filter(d => d.mac !== mac));
-    } catch (e) {
-      setError('Pairing failed: ' + e.message);
-    }
-    setPairing(null);
-  };
-
-  const disconnectSpeaker = async (mac) => {
-    try {
-      await fetch(`${API_BASE}/api/speakers/disconnect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mac }),
-      });
-      await fetchSpeakers();
-    } catch (e) {
-      setError('Disconnect failed: ' + e.message);
-    }
-  };
-
-  const startTheater = async () => {
-    setStarting(true);
-    try {
-      // Save layout first
-      await saveLayout();
-      const res = await fetch(`${API_BASE}/api/theater/start`, { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        setStreaming(true);
-        setMode(data.mode);
-      } else {
-        setError(data.error || 'Failed to start');
-      }
-    } catch (e) {
-      setError('Start failed: ' + e.message);
-    }
-    setStarting(false);
-  };
-
-  const stopTheater = async () => {
-    try {
-      await fetch(`${API_BASE}/api/theater/stop`, { method: 'POST' });
-      setStreaming(false);
-    } catch (e) {
-      setError('Stop failed: ' + e.message);
-    }
-  };
-
-  const assignRole = (mac, role) => {
-    setSpeakers(prev => prev.map(s => s.mac === mac ? { ...s, role } : s));
+  const assignRole = (id, role) => {
+    setSpeakers(prev => prev.map(s => s.id === id ? { ...s, role } : s));
   };
 
   const saveLayout = async () => {
@@ -142,7 +65,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          speakers: speakers.map(s => ({ mac: s.mac, sinkName: s.sinkName, name: s.name, role: s.role, x: s.x, y: s.y })),
+          speakers: speakers.map(s => ({ id: s.id, name: s.name, role: s.role, x: s.x, y: s.y })),
           listener: listenerPos,
           room: roomSize,
         }),
@@ -201,8 +124,8 @@ function App() {
         <div className="logo-group">
           <div className="logo-icon">🔊</div>
           <div>
-            <h1>Spatial Theater</h1>
-            <p className="subtitle">Bluetooth Home Theater System</p>
+            <h1>Wi-Fi Spatial Theater</h1>
+            <p className="subtitle">Snapcast Multiroom System</p>
           </div>
         </div>
         <div className="header-badges">
@@ -255,8 +178,8 @@ function App() {
               const cfg = ROLE_CONFIG[sp.role] || ROLE_CONFIG.auto;
               return (
                 <div
-                  key={sp.mac}
-                  className={`room-marker speaker-marker ${streaming ? 'streaming' : ''}`}
+                  key={sp.id}
+                  className={`room-marker speaker-marker streaming`}
                   style={{
                     left: toPercent(sp.x, roomSize.width),
                     top: toPercent(sp.y, roomSize.height),
@@ -286,39 +209,42 @@ function App() {
 
             {speakers.length === 0 && (
               <div className="room-empty">
-                <p>No speakers connected</p>
-                <p className="room-empty-sub">Scan and pair Bluetooth speakers to get started</p>
+                <p>No Wi-Fi clients connected</p>
+                <p className="room-empty-sub">Open the Snapcast app on your devices on this network</p>
               </div>
             )}
           </div>
-          <p className="room-hint">Drag speakers and listener to match your physical room layout</p>
+          <p className="room-hint">Drag speakers and listener to match your physical room layout. Distance affects volume.</p>
         </section>
 
         {/* ─── Speaker Panel ─── */}
         <section className="speaker-section">
           <div className="section-title">
-            <h2>Speakers</h2>
-            <span className="speaker-count">{speakers.length}/3</span>
+            <h2>Wi-Fi Speakers</h2>
+            <span className="speaker-count">{speakers.length} Connected</span>
           </div>
 
           <div className="speaker-list">
             {speakers.length === 0 && (
               <div className="no-speakers-card">
                 <div className="no-speakers-icon">📡</div>
-                <p>No speakers paired yet</p>
+                <p>Waiting for clients...</p>
+                <p style={{fontSize: '0.85em', color: '#94a3b8', marginTop: '4px'}}>
+                  Connect phones or laptops to this Wi-Fi network and open the Snapcast app.
+                </p>
               </div>
             )}
             {speakers.map((sp) => {
               const cfg = ROLE_CONFIG[sp.role] || ROLE_CONFIG.auto;
               return (
-                <div key={sp.mac} className="speaker-card" style={{ '--card-accent': cfg.color }}>
+                <div key={sp.id} className="speaker-card" style={{ '--card-accent': cfg.color }}>
                   <div className="speaker-card-header">
                     <div className="speaker-icon" style={{ background: cfg.color }}>{cfg.label}</div>
                     <div className="speaker-info">
                       <h3>{sp.name}</h3>
-                      <span className="speaker-mac">{sp.mac}</span>
+                      <span className="speaker-mac">ID: {sp.id.substring(0, 12)}...</span>
                     </div>
-                    <button className="btn-icon btn-disconnect" onClick={() => disconnectSpeaker(sp.mac)} title="Disconnect">✕</button>
+                    <div className="client-volume">{sp.volume}%</div>
                   </div>
                   <div className="speaker-card-body">
                     <label className="role-label">Role</label>
@@ -328,15 +254,20 @@ function App() {
                           key={key}
                           className={`role-btn ${sp.role === key ? 'active' : ''}`}
                           style={{ '--role-color': val.color }}
-                          onClick={() => assignRole(sp.mac, key)}
+                          onClick={() => assignRole(sp.id, key)}
                         >
                           {val.fullLabel}
                         </button>
                       ))}
                     </div>
-                    <div className="speaker-status">
-                      <span className={`status-dot ${sp.sinkName ? 'ok' : 'err'}`} />
-                      {sp.sinkName ? 'Audio sink ready' : 'No audio sink'}
+                    <div className="speaker-status" style={{marginTop: '12px'}}>
+                      <span className={`status-dot ok`} />
+                      Connected to server
+                      {['left', 'right'].includes(sp.role) && (
+                        <span style={{display: 'block', fontSize: '0.8em', color: '#f59e0b', marginTop: '4px'}}>
+                          * Set the {sp.role} channel natively in your device's Snapcast app settings.
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -344,28 +275,12 @@ function App() {
             })}
           </div>
 
-          {/* Actions */}
-          <div className="action-buttons">
-            <button className="btn btn-scan" onClick={scanForDevices} disabled={scanning}>
-              {scanning ? '🔄 Scanning...' : '📡 Scan for Speakers'}
-            </button>
-            {speakers.length > 0 && (
-              streaming ? (
-                <button className="btn btn-stop" onClick={stopTheater}>⏹ Stop Theater</button>
-              ) : (
-                <button className="btn btn-start" onClick={startTheater} disabled={starting}>
-                  {starting ? '⏳ Starting...' : '▶ Start Theater'}
-                </button>
-              )
-            )}
-          </div>
-
           {/* ─── Now Playing ─── */}
           <div className="now-playing-section">
             <h2>Now Playing</h2>
             <div className="now-playing-card">
               <div className="np-visual">
-                {streaming && streamStatus === 'playing' ? (
+                {streamStatus === 'playing' ? (
                   <div className="eq-bars">
                     <span /><span /><span /><span /><span />
                   </div>
@@ -378,83 +293,19 @@ function App() {
                   {streamStatus === 'playing' ? 'Streaming from Spotify' : 'Not streaming'}
                 </p>
                 <p className="np-sub">
-                  {streaming
-                    ? `${speakers.length} speaker${speakers.length !== 1 ? 's' : ''} active · ${mode}`
-                    : 'Start the theater to begin playback'}
+                  {speakers.length} active client{speakers.length !== 1 ? 's' : ''}
                 </p>
               </div>
               <div className="np-stream-status">
                 <span className={`stream-indicator ${streamStatus}`} />
               </div>
             </div>
-
-            {/* Snapcast clients */}
-            {snapInfo.clients?.length > 0 && (
-              <div className="snap-clients">
-                <h3>Connected Clients</h3>
-                {snapInfo.clients.map((c, i) => (
-                  <div key={i} className="snap-client-row">
-                    <span className={`status-dot ${c.connected ? 'ok' : 'err'}`} />
-                    <span className="snap-client-name">{c.name}</span>
-                    <span className="snap-client-vol">{c.volume ?? '—'}%</span>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </section>
       </div>
 
-      {/* ─── Scan Modal ─── */}
-      {showScanModal && (
-        <div className="modal-overlay" onClick={() => !scanning && setShowScanModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Discover Speakers</h2>
-              <button className="btn-icon" onClick={() => setShowScanModal(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              {scanning && (
-                <div className="scan-animation">
-                  <div className="scan-ring" />
-                  <div className="scan-ring delay-1" />
-                  <div className="scan-ring delay-2" />
-                  <p>Scanning for Bluetooth devices...</p>
-                </div>
-              )}
-              {!scanning && discoveredDevices.length === 0 && (
-                <div className="scan-empty">
-                  <p>No new devices found</p>
-                  <p className="scan-hint">Make sure your speakers are in pairing mode, then try again.</p>
-                  <button className="btn btn-scan" onClick={scanForDevices}>🔄 Scan Again</button>
-                </div>
-              )}
-              {discoveredDevices.length > 0 && (
-                <div className="device-list">
-                  {discoveredDevices.map(d => (
-                    <div key={d.mac} className="device-row">
-                      <div className="device-info">
-                        <span className="device-name">{d.name}</span>
-                        <span className="device-mac">{d.mac}</span>
-                      </div>
-                      <button
-                        className="btn btn-pair"
-                        onClick={() => pairDevice(d.mac)}
-                        disabled={pairing === d.mac}
-                      >
-                        {pairing === d.mac ? '⏳ Pairing...' : '🔗 Pair'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       <footer className="app-footer">
-        <p>Spatial Theater · Spotify → Librespot → Snapcast → Bluetooth</p>
+        <p>Wi-Fi Spatial Theater · Spotify → Librespot → Snapserver → Wi-Fi Clients</p>
       </footer>
     </div>
   );

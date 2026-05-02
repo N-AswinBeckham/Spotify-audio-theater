@@ -1,17 +1,17 @@
-# Spatial Theater — Bluetooth Multi-Speaker Home Theater
+# Spatial Theater — Wi-Fi Distributed Multiroom Audio
 
-A DIY home theater system that turns your **Raspberry Pi** and **Bluetooth speakers** into a spatial audio experience. Plays music from **Spotify** → streams losslessly via **Snapcast** → routes to multiple BT speakers with per-channel volume for Left / Right / Bass separation.
+A DIY home theater system that streams your **Spotify** music losslessly via **Snapcast** over your local **Wi-Fi network**. Use old phones, laptops, or other Raspberry Pis as client receivers plugged into your speakers. This bypasses any Bluetooth hardware bottlenecks!
 
 ```
 Spotify App (Mac/Phone)
     │ Spotify Connect
     ▼
 Librespot (RPi)  →  FIFO pipe  →  Snapserver (RPi)
-                                      │
+                                      │ (Wi-Fi)
                           ┌───────────┼───────────┐
                           ▼           ▼           ▼
-                    Snapclient    Snapclient   Snapclient
-                    → BT Left    → BT Right   → BT Bass
+                   Phone (Snapapp)  Laptop      Phone (Snapapp)
+                   → Left Speaker   → Subwoofer → Right Speaker
 ```
 
 ---
@@ -19,8 +19,9 @@ Librespot (RPi)  →  FIFO pipe  →  Snapserver (RPi)
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Raspberry Pi 4 (with Bluetooth)
-- 1–3 Bluetooth speakers
+- Raspberry Pi (Any model)
+- 1–3 "Client" devices (Old Android phones, iPhones, laptops, other Pis)
+- Speakers connected to the client devices (via AUX or a single BT connection per client)
 - Spotify Premium account
 - Node.js 18+ on the RPi
 
@@ -68,16 +69,15 @@ cd speaker-server && npm start
 cd snapweb && npm run dev
 ```
 
-### 4. Open the Web App on your Mac
+### 4. Open the Web App & Connect Clients
 
 1. Find your RPi's IP address: `hostname -I`
-2. Open **`http://<rpi-ip>:5173`** in Chrome on your Mac
-3. Click **📡 Scan for Speakers** — put your BT speakers in pairing mode
-4. Pair each speaker and assign roles: **Left**, **Right**, **Bass**
-5. Drag the speaker markers to match your physical room layout
-6. Click **▶ Start Theater**
-7. Open Spotify on your Mac → Select **"SpatialSource"** as playback device
-8. Play a song — audio comes out of all your speakers! 🎉
+2. Open **`http://<rpi-ip>:5173`** in Chrome on your Mac/PC to view the "Spatial Theater" control panel.
+3. On your client devices (phones/laptops), download the **Snapcast app** (or use a Snapclient). Point them to the RPi's IP address.
+4. As clients connect, they will magically appear in the Web App!
+5. Assign roles: **Left**, **Right**, **Bass** and adjust their positions in the virtual room. (Note: For Left/Right stereo separation, ensure you set the channel to Left/Right natively within the Snapcast app on your phone).
+6. Open Spotify → Select **"SpatialSource"** as playback device.
+7. Play a song — audio perfectly syncs across all your devices! 🎉
 
 ---
 
@@ -95,13 +95,12 @@ The system automatically adapts based on how many speakers are connected.
 
 ## 🎧 How Spatial Audio Works
 
-Each BT speaker becomes a PulseAudio sink on the RPi. The speaker-server runs one `snapclient` per speaker, each outputting to its own sink. Per-channel volume is set via `pactl`:
+Each client connects to the Snapserver over Wi-Fi. The `speaker-server` listens to Snapserver via JSON-RPC to discover connected clients and applies **distance attenuation** (volume control) based on where you place the speakers in the virtual room UI.
 
-- **Left speaker**: Left channel 100%, Right channel 20%
-- **Right speaker**: Left channel 20%, Right channel 100%
-- **Bass speaker**: Both channels 90% (mono center mix)
-
-This creates convincing stereo separation and a dedicated bass channel from a standard stereo Spotify stream.
+For hard channel separation:
+- **Left speaker**: Set the Android Snapcast app to "Left Channel".
+- **Right speaker**: Set the Android Snapcast app to "Right Channel".
+- **Bass speaker**: Set to Mono mix (Both channels).
 
 ---
 
@@ -116,10 +115,8 @@ spatial-audio-server/
 │   ├── install.sh
 │   ├── run_snapserver.sh
 │   └── snapserver.conf
-├── speaker-server/         # BT + spatial control API (Node.js)
+├── speaker-server/         # Wi-Fi client control API (Node.js)
 │   ├── server.js           # Express REST API (port 3456)
-│   ├── bt-manager.js       # bluetoothctl + pactl wrapper
-│   ├── snapclient-manager.js  # Multi-snapclient process manager
 │   ├── spatial-engine.js   # Per-speaker volume calculation
 │   ├── install.sh
 │   └── package.json
@@ -135,24 +132,11 @@ spatial-audio-server/
 
 ## 🔧 Troubleshooting
 
-### Speaker not showing up after pairing?
-```bash
-# Check PulseAudio sees the Bluetooth sink
-pactl list sinks short | grep bluez
-# If empty, restart PulseAudio
-pulseaudio -k && pulseaudio --start
-```
+### Clients not showing up?
+Ensure all client devices (phones, laptops) are connected to the **same Wi-Fi network** as the Raspberry Pi. If they still don't show up, manually enter the Raspberry Pi's IP address into the Snapcast app settings on your phone.
 
-### No audio from speakers?
-```bash
-# Check snapclients are running
-ps aux | grep snapclient
-# Check snapserver is streaming
-curl -s http://localhost:1780/jsonrpc -d '{"id":1,"jsonrpc":"2.0","method":"Server.GetStatus"}' | python3 -m json.tool
-```
-
-### Can't connect more than 1 BT speaker?
-The RPi 4's built-in Bluetooth can struggle with multiple A2DP connections. Use a **USB Bluetooth 5.0 dongle** for reliable multi-speaker support.
+### Audio out of sync?
+Snapcast is usually perfectly synced out of the box. If there is a delay (often caused by the Bluetooth connection between a client phone and its speaker), use the "Latency" offset feature within the Snapcast app on that specific phone to dial it in perfectly.
 
 ---
 
