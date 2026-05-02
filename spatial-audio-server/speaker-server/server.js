@@ -124,27 +124,45 @@ app.post('/api/speakers/disconnect', async (req, res) => {
 app.post('/api/theater/start', async (req, res) => {
   try {
     const speakers = await getConnectedSpeakers();
+    console.log(`[theater] Found ${speakers.length} speakers:`, speakers.map(s => `${s.name} (${s.mac}) sink=${s.sinkName}`));
+
     if (speakers.length === 0) {
       return res.status(400).json({ error: 'No Bluetooth speakers connected' });
     }
 
-    // Start a snapclient for each speaker
+    // Check that speakers have PulseAudio sinks
+    const speakersWithSinks = speakers.filter(sp => sp.sinkName);
+    if (speakersWithSinks.length === 0) {
+      return res.status(400).json({
+        error: 'Bluetooth speakers connected but no PulseAudio sinks found. Try disconnecting and reconnecting the speakers.',
+        speakers: speakers.map(s => ({ mac: s.mac, name: s.name, sinkName: s.sinkName })),
+      });
+    }
+
+    // Start a snapclient for each speaker that has a sink
     const results = [];
-    for (const sp of speakers) {
-      if (!sp.sinkName) continue;
+    for (const sp of speakersWithSinks) {
       const hostId = `theater_${sp.mac.replace(/:/g, '')}`;
+      console.log(`[theater] Starting client for ${sp.name} -> sink: ${sp.sinkName}`);
       const entry = startClient(sp.sinkName, hostId);
       results.push({ mac: sp.mac, name: sp.name, sinkName: sp.sinkName, status: entry.status });
     }
 
-    // Wait a moment for clients to connect, then apply volumes
+    // Wait a moment for clients to connect, then check status and apply volumes
     setTimeout(async () => {
-      await applyVolumes();
-    }, 2000);
+      const activeClients = listClients();
+      console.log(`[theater] After 3s: ${activeClients.length} clients still running:`, activeClients);
+      if (activeClients.length > 0) {
+        await applyVolumes();
+      } else {
+        console.error('[theater] WARNING: All snapclients exited within 3 seconds of starting!');
+      }
+    }, 3000);
 
     const mode = getMode(results.length);
     res.json({ success: true, mode, speakers: results });
   } catch (err) {
+    console.error('[theater] Start failed:', err);
     res.status(500).json({ error: err.message });
   }
 });
