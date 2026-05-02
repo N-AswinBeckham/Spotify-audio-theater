@@ -20,12 +20,15 @@ fi
 # as the official librespot repo does not provide them.
 echo "Fetching latest release info from Raspotify..."
 RELEASE_JSON=$(curl -s https://api.github.com/repos/dtcooper/raspotify/releases/latest)
-DEB_URL=$(echo "$RELEASE_JSON" | grep -o 'https://github.com/dtcooper/raspotify/releases/download/[^"]*arm64.deb' | head -n 1)
+DEB_URL=$(echo "$RELEASE_JSON" | grep -o 'https://github.com/dtcooper/raspotify/releases/download/[^"]*/raspotify_[^"]*_arm64\.deb' | head -n 1)
 
 if [ -z "$DEB_URL" ]; then
     echo "Failed to find ARM64 deb package automatically."
     echo "Trying fallback URL..."
-    LATEST_VERSION=$(echo "$RELEASE_JSON" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    LATEST_VERSION=$(echo "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+    if [ -z "$LATEST_VERSION" ]; then
+        LATEST_VERSION="0.48.1"
+    fi
     DEB_URL="https://github.com/dtcooper/raspotify/releases/download/${LATEST_VERSION}/raspotify_${LATEST_VERSION}.librespot.v0.8.0-ea81314_arm64.deb"
 fi
 
