@@ -1,0 +1,14 @@
+[Unit]
+Description=Spatial Theater Speaker Server
+After=network.target bluetooth.target pulseaudio.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/spatial-audio-server/speaker-server
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

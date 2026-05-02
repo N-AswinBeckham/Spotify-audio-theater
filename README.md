@@ -1,67 +1,160 @@
-# Ethical Multi-Device Spatial Audio Streaming
+# Spatial Theater — Bluetooth Multi-Speaker Home Theater
 
-A high-fidelity, lossless spatial audio streaming system for your local network. This project uses `librespot` to pull bit-perfect audio from Spotify, `snapserver` to distribute it as lossless FLAC, and a custom React web client to apply real-time HRTF (Head-Related Transfer Function) spatialization.
+A DIY home theater system that turns your **Raspberry Pi** and **Bluetooth speakers** into a spatial audio experience. Plays music from **Spotify** → streams losslessly via **Snapcast** → routes to multiple BT speakers with per-channel volume for Left / Right / Bass separation.
 
-## 🚀 Quick Start
-
-### 1. Server Setup (Raspberry Pi 4)
-
-Transfer the `spatial-audio-server` directory to your Pi.
-
-```bash
-# 1. Download librespot binary for aarch64
-./librespot/install.sh
-
-# 2. Install snapserver
-./snapserver/install.sh
-
-# 3. Configure librespot (LOGIN REQUIRED HERE)
-# Open librespot/run_librespot.sh and add your credentials if not using discovery
-# Example: ./librespot -n "SpatialSource" -u <user> -p <pass> ...
 ```
-
-### 2. Run the Services
-
-You can run them manually or use the systemd files provided in `systemd/`.
-
-```bash
-# Start the audio source
-./librespot/run_librespot.sh
-
-# Start the stream server
-./snapserver/run_snapserver.sh
+Spotify App (Mac/Phone)
+    │ Spotify Connect
+    ▼
+Librespot (RPi)  →  FIFO pipe  →  Snapserver (RPi)
+                                      │
+                          ┌───────────┼───────────┐
+                          ▼           ▼           ▼
+                    Snapclient    Snapclient   Snapclient
+                    → BT Left    → BT Right   → BT Bass
 ```
-
-### 3. Web Client (The Spatial Experience)
-
-The web client is built with Vite and React.
-
-```bash
-cd snapweb
-npm install
-npm run build
-# Serve the 'dist' folder using a web server (e.g., python3 -m http.server 8080)
-```
-
-1. Open the web app in your browser (use Chrome/Firefox for best HRTF support).
-2. Enter the **IP address** of your Raspberry Pi.
-3. Click **"Connect & Play"**.
-4. **Drag the green source dot** around the room to experience 3D spatial audio through your headphones.
 
 ---
 
-## 🔑 Do I need to login?
+## 🚀 Quick Start
 
-**Yes and No.**
+### Prerequisites
+- Raspberry Pi 4 (with Bluetooth)
+- 1–3 Bluetooth speakers
+- Spotify Premium account
+- Node.js 18+ on the RPi
 
-*   **Spotify (Server Side):** `librespot` requires a **Spotify Premium** account to pull the audio stream. You will need to provide your credentials to `librespot` on the server. If you run it with default settings, it should appear in your Spotify app's "Connect" menu as "SpatialSource". Once you select it, it will prompt for login or use your current session if discovery is working.
-*   **Web Client (User Side):** **No login is required.** The web client simply connects to the Snapserver's raw audio stream. Anyone on your local network can open the web app and start listening to the spatialized stream without authentication.
+### 1. Clone & Transfer to RPi
 
-## 🎧 Best Experience
+```bash
+git clone https://github.com/N-AswinBeckham/Spotify-audio-theater.git
+# Transfer spatial-audio-server/ to your RPi
+```
 
-*   **Use Headphones:** HRTF spatialization is designed specifically for binaural listening.
-*   **Lossless Chain:** The audio stays as lossless FLAC throughout your network, ensuring the highest subjective quality.
-*   **Head Tracking:** If accessing via a mobile browser, the spatialization stays relative to the "virtual room" you've set up.
+### 2. Install Everything on the RPi
+
+```bash
+cd spatial-audio-server
+
+# Install librespot (Spotify Connect receiver)
+chmod +x librespot/install.sh
+./librespot/install.sh
+
+# Install snapserver (lossless audio distributor)
+chmod +x snapserver/install.sh
+./snapserver/install.sh
+
+# Install speaker-server (BT management + spatial engine)
+chmod +x speaker-server/install.sh
+./speaker-server/install.sh
+
+# Install web app dependencies
+cd snapweb && npm install && cd ..
+```
+
+### 3. Start the Services (4 terminals or use systemd)
+
+```bash
+# Terminal 1: Spotify receiver
+./librespot/run_librespot.sh
+
+# Terminal 2: Audio stream server
+./snapserver/run_snapserver.sh
+
+# Terminal 3: Speaker management API
+cd speaker-server && npm start
+
+# Terminal 4: Web UI (accessible from your Mac)
+cd snapweb && npm run dev
+```
+
+### 4. Open the Web App on your Mac
+
+1. Find your RPi's IP address: `hostname -I`
+2. Open **`http://<rpi-ip>:5173`** in Chrome on your Mac
+3. Click **📡 Scan for Speakers** — put your BT speakers in pairing mode
+4. Pair each speaker and assign roles: **Left**, **Right**, **Bass**
+5. Drag the speaker markers to match your physical room layout
+6. Click **▶ Start Theater**
+7. Open Spotify on your Mac → Select **"SpatialSource"** as playback device
+8. Play a song — audio comes out of all your speakers! 🎉
+
+---
+
+## 🔊 Speaker Modes (Adaptive)
+
+| Speakers | Mode | Behavior |
+|----------|------|----------|
+| 1 | **Mono** | Full stereo mix on single speaker |
+| 2 | **Stereo** | Left/Right channel separation |
+| 3 | **Surround** | L + R stereo + center Bass speaker |
+
+The system automatically adapts based on how many speakers are connected.
+
+---
+
+## 🎧 How Spatial Audio Works
+
+Each BT speaker becomes a PulseAudio sink on the RPi. The speaker-server runs one `snapclient` per speaker, each outputting to its own sink. Per-channel volume is set via `pactl`:
+
+- **Left speaker**: Left channel 100%, Right channel 20%
+- **Right speaker**: Left channel 20%, Right channel 100%
+- **Bass speaker**: Both channels 90% (mono center mix)
+
+This creates convincing stereo separation and a dedicated bass channel from a standard stereo Spotify stream.
+
+---
+
+## 📁 Project Structure
+
+```
+spatial-audio-server/
+├── librespot/              # Spotify Connect receiver
+│   ├── install.sh
+│   └── run_librespot.sh
+├── snapserver/             # Lossless audio distribution
+│   ├── install.sh
+│   ├── run_snapserver.sh
+│   └── snapserver.conf
+├── speaker-server/         # BT + spatial control API (Node.js)
+│   ├── server.js           # Express REST API (port 3456)
+│   ├── bt-manager.js       # bluetoothctl + pactl wrapper
+│   ├── snapclient-manager.js  # Multi-snapclient process manager
+│   ├── spatial-engine.js   # Per-speaker volume calculation
+│   ├── install.sh
+│   └── package.json
+├── snapweb/                # React web app (Vite)
+│   └── src/
+│       ├── App.jsx         # Room layout + speaker management UI
+│       └── index.css       # Premium dark theme
+├── systemd/                # Optional systemd service files
+└── fifo/                   # Named pipe for librespot → snapserver
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### Speaker not showing up after pairing?
+```bash
+# Check PulseAudio sees the Bluetooth sink
+pactl list sinks short | grep bluez
+# If empty, restart PulseAudio
+pulseaudio -k && pulseaudio --start
+```
+
+### No audio from speakers?
+```bash
+# Check snapclients are running
+ps aux | grep snapclient
+# Check snapserver is streaming
+curl -s http://localhost:1780/jsonrpc -d '{"id":1,"jsonrpc":"2.0","method":"Server.GetStatus"}' | python3 -m json.tool
+```
+
+### Can't connect more than 1 BT speaker?
+The RPi 4's built-in Bluetooth can struggle with multiple A2DP connections. Use a **USB Bluetooth 5.0 dongle** for reliable multi-speaker support.
+
+---
 
 ## ⚠️ Ethical Disclaimer
 This project is for personal, non-commercial use only. Respect Spotify's Terms of Service and only stream to devices you own.
