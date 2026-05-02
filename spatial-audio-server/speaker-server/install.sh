@@ -14,12 +14,10 @@ echo "Node.js version: $(node -v)"
 
 # Check for snapclient
 if ! command -v snapclient &>/dev/null; then
-    echo "Installing snapclient..."
-    ARCH=$(dpkg --print-architecture)
-    SNAP_VERSION="0.28.0"
-    wget "https://github.com/badaix/snapcast/releases/download/v${SNAP_VERSION}/snapclient_${SNAP_VERSION}-1_${ARCH}.deb" -O /tmp/snapclient.deb
-    sudo dpkg -i /tmp/snapclient.deb || sudo apt-get install -f -y
-    rm /tmp/snapclient.deb
+    echo "Installing snapclient via apt..."
+    sudo apt-get update
+    sudo apt-get install -y snapclient
+    
     # Disable the default snapclient service (we manage our own instances)
     sudo systemctl stop snapclient 2>/dev/null || true
     sudo systemctl disable snapclient 2>/dev/null || true
