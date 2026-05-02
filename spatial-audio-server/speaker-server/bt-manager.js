@@ -122,16 +122,20 @@ export async function listBluetoothSinks() {
   const sinks = [];
   for (const line of output.split('\n')) {
     const parts = line.split('\t');
-    if (parts.length >= 5 && parts[1].includes('bluez_sink')) {
-      // Extract MAC from sink name: bluez_sink.AA_BB_CC_DD_EE_FF.a2dp_sink
-      const macMatch = parts[1].match(/bluez_sink\.([\dA-Fa-f_]{17})/);
-      const mac = macMatch ? macMatch[1].replace(/_/g, ':') : '';
-      sinks.push({
-        index: parseInt(parts[0]),
-        sinkName: parts[1],
-        mac: mac.toUpperCase(),
-        state: parts[4],
-      });
+    if (parts.length >= 2) {
+      const sinkName = parts[1];
+      // Match either bluez_sink.XX_XX... or bluez_output.XX_XX...
+      const macMatch = sinkName.match(/bluez_(?:sink|output)\.([\dA-Fa-f_]{17})/i);
+      
+      if (macMatch) {
+        const mac = macMatch[1].replace(/_/g, ':');
+        sinks.push({
+          index: parseInt(parts[0]),
+          sinkName: sinkName,
+          mac: mac.toUpperCase(),
+          state: parts[4] || 'UNKNOWN',
+        });
+      }
     }
   }
   return sinks;
