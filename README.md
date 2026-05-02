@@ -12,7 +12,10 @@ Transfer the `spatial-audio-server` directory to your Pi.
 # 1. Download librespot binary for aarch64
 ./librespot/install.sh
 
-# 2. Configure librespot (LOGIN REQUIRED HERE)
+# 2. Install snapserver
+./snapserver/install.sh
+
+# 3. Configure librespot (LOGIN REQUIRED HERE)
 # Open librespot/run_librespot.sh and add your credentials if not using discovery
 # Example: ./librespot -n "SpatialSource" -u <user> -p <pass> ...
 ```
