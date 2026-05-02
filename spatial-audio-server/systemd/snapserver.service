@@ -1,0 +1,12 @@
+[Unit]
+Description=Snapcast server
+After=network.target librespot.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/snapserver -c /opt/spatial-audio-server/snapserver/snapserver.conf
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=Librespot Spatial Audio Source
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/spatial-audio-server/librespot
+ExecStart=/opt/spatial-audio-server/librespot/run_librespot.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
