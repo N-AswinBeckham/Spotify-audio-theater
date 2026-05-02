@@ -71,13 +71,18 @@ cd snapweb && npm run dev
 
 ### 4. Open the Web App & Connect Clients
 
-1. Find your RPi's IP address: `hostname -I`
-2. Open **`http://<rpi-ip>:5173`** in Chrome on your Mac/PC to view the "Spatial Theater" control panel.
-3. On your client devices (phones/laptops), download the **Snapcast app** (or use a Snapclient). Point them to the RPi's IP address.
-4. As clients connect, they will magically appear in the Web App!
-5. Assign roles: **Left**, **Right**, **Bass** and adjust their positions in the virtual room. (Note: For Left/Right stereo separation, ensure you set the channel to Left/Right natively within the Snapcast app on your phone).
-6. Open Spotify → Select **"SpatialSource"** as playback device.
-7. Play a song — audio perfectly syncs across all your devices! 🎉
+1. **Find your RPi's IP address**: Run `hostname -I` on the Raspberry Pi.
+2. **Open the Control Panel**: On your Mac or PC, open **`http://<rpi-ip>:5173`** in Chrome. This is your spatial management dashboard.
+3. **Connect Mobile Devices**:
+   - **Install App**: Download the **Snapcast** app (available on Play Store/App Store).
+   - **Point to Server**: In the app settings, enter your RPi's IP address as the server.
+   - **Link Bluetooth Speaker**: Pair your phone with its intended Bluetooth speaker. The Snapcast app will now route the synced stream to that speaker.
+   - **Set Channel**: In the Snapcast app settings, set the **Channel** (e.g., "Left" for your left-side speaker, "Right" for the right).
+4. **Arrange & Play**:
+   - Your devices will automatically appear as markers in the Web UI.
+   - Assign roles (**Left**, **Right**, **Bass**) and drag the markers to match your physical room layout.
+   - Open Spotify on any device and select **"SpatialSource"** as the playback device.
+   - Play a song — the system will automatically handle the spatial volume and sync! 🎉
 
 ---
 
